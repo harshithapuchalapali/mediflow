@@ -1,0 +1,38 @@
+# Python backend
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build output
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Logs
+*.log
+npm-debug.log*
+
+# Database
+database/*.sql.old
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test / coverage
+coverage/
+
+# Uploads (runtime)
+uploads/
