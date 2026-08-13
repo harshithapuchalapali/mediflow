@@ -37,6 +37,7 @@ from app.models import (  # noqa: E402,F401
     MedicalRecordVersion,
     Prescription,
     PrescriptionItem,
+    LabRequest,
 )
 
 target_metadata = Base.metadata

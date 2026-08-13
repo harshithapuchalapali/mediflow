@@ -73,6 +73,9 @@ class User(Base):
     patient_allergies: Mapped[list["PatientAllergy"]] = relationship(
         back_populates="created_by_user"
     )
+    admin_verified_lab_requests: Mapped[list["LabRequest"]] = relationship(
+        back_populates="verified_by_admin_user"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -142,6 +145,9 @@ class Patient(Base):
     prescriptions: Mapped[list["Prescription"]] = relationship(
         back_populates="patient"
     )
+    lab_requests: Mapped[list["LabRequest"]] = relationship(
+        back_populates="patient"
+    )
 
     __table_args__ = (
         CheckConstraint("dob <= CURRENT_DATE", name="ck_patients_dob"),
@@ -201,6 +207,14 @@ class Doctor(Base):
     )
     prescriptions: Mapped[list["Prescription"]] = relationship(
         back_populates="doctor"
+    )
+    lab_requests: Mapped[list["LabRequest"]] = relationship(
+        back_populates="doctor",
+        foreign_keys="LabRequest.doctor_id",
+    )
+    verified_lab_requests: Mapped[list["LabRequest"]] = relationship(
+        back_populates="verifier",
+        foreign_keys="LabRequest.verified_by",
     )
 
     __table_args__ = (
@@ -287,6 +301,9 @@ class Appointment(Base):
     medical_record: Mapped[Optional["MedicalRecord"]] = relationship(
         back_populates="appointment",
         uselist=False,
+    )
+    lab_requests: Mapped[list["LabRequest"]] = relationship(
+        back_populates="appointment"
     )
 
     __table_args__ = (
@@ -494,4 +511,67 @@ class PrescriptionItem(Base):
             name="ck_prescription_items_duration_in_days",
         ),
         Index("idx_prescription_items_prescription", "prescription_id"),
+    )
+
+
+class LabRequest(Base):
+    __tablename__ = "lab_requests"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    appointment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("appointments.id"), nullable=False
+    )
+    patient_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("patients.id"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=False
+    )
+    test_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'REQUESTED'")
+    )
+    result_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    report_file_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    verified_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=True
+    )
+    verified_by_admin: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    appointment: Mapped["Appointment"] = relationship(back_populates="lab_requests")
+    patient: Mapped["Patient"] = relationship(back_populates="lab_requests")
+    doctor: Mapped["Doctor"] = relationship(
+        back_populates="lab_requests",
+        foreign_keys=[doctor_id],
+    )
+    verifier: Mapped[Optional["Doctor"]] = relationship(
+        back_populates="verified_lab_requests",
+        foreign_keys=[verified_by],
+    )
+    verified_by_admin_user: Mapped[Optional["User"]] = relationship(
+        back_populates="admin_verified_lab_requests",
+        foreign_keys=[verified_by_admin],
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('REQUESTED', 'IN_PROGRESS', 'RESULT_READY', 'VERIFIED')",
+            name="ck_lab_requests_status",
+        ),
+        Index("idx_lab_patient", "patient_id", "status"),
+        Index("idx_lab_appointment", "appointment_id"),
+        Index("idx_lab_doctor", "doctor_id"),
     )
