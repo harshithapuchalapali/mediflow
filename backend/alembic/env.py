@@ -38,6 +38,11 @@ from app.models import (  # noqa: E402,F401
     Prescription,
     PrescriptionItem,
     LabRequest,
+    Bill,
+    BillItem,
+    Payment,
+    RefreshToken,
+    PasswordResetToken,
 )
 
 target_metadata = Base.metadata

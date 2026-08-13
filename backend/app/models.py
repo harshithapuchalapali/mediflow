@@ -76,6 +76,15 @@ class User(Base):
     admin_verified_lab_requests: Mapped[list["LabRequest"]] = relationship(
         back_populates="verified_by_admin_user"
     )
+    recorded_payments: Mapped[list["Payment"]] = relationship(
+        back_populates="recorded_by_user"
+    )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -148,6 +157,7 @@ class Patient(Base):
     lab_requests: Mapped[list["LabRequest"]] = relationship(
         back_populates="patient"
     )
+    bills: Mapped[list["Bill"]] = relationship(back_populates="patient")
 
     __table_args__ = (
         CheckConstraint("dob <= CURRENT_DATE", name="ck_patients_dob"),
@@ -304,6 +314,10 @@ class Appointment(Base):
     )
     lab_requests: Mapped[list["LabRequest"]] = relationship(
         back_populates="appointment"
+    )
+    bill: Mapped[Optional["Bill"]] = relationship(
+        back_populates="appointment",
+        uselist=False,
     )
 
     __table_args__ = (
@@ -574,4 +588,181 @@ class LabRequest(Base):
         Index("idx_lab_patient", "patient_id", "status"),
         Index("idx_lab_appointment", "appointment_id"),
         Index("idx_lab_doctor", "doctor_id"),
+    )
+
+
+class Bill(Base):
+    __tablename__ = "bills"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bill_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    patient_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("patients.id"), nullable=False
+    )
+    appointment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("appointments.id"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'PENDING'"),
+    )
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    patient: Mapped["Patient"] = relationship(back_populates="bills")
+    appointment: Mapped["Appointment"] = relationship(back_populates="bill")
+    items: Mapped[list["BillItem"]] = relationship(
+        back_populates="bill",
+        cascade="all, delete-orphan",
+        order_by="BillItem.id",
+    )
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="bill",
+        order_by="Payment.paid_at",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'REFUNDED')",
+            name="ck_bills_status",
+        ),
+        Index("idx_bills_patient", "patient_id"),
+        Index("idx_bills_appointment", "appointment_id"),
+        Index("idx_bills_status", "status"),
+    )
+
+
+class BillItem(Base):
+    __tablename__ = "bill_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bill_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("bills.id"), nullable=False
+    )
+    description: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("1")
+    )
+    unit_price: Mapped[float] = mapped_column(
+        Numeric(12, 2), nullable=False
+    )
+
+    bill: Mapped["Bill"] = relationship(back_populates="items")
+
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('CONSULTATION', 'LAB_TEST', 'PROCEDURE', 'SERVICE')",
+            name="ck_bill_items_category",
+        ),
+        CheckConstraint("quantity > 0", name="ck_bill_items_quantity"),
+        CheckConstraint("unit_price >= 0", name="ck_bill_items_unit_price"),
+        Index("idx_bill_items_bill", "bill_id"),
+    )
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bill_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("bills.id"), nullable=False
+    )
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    transaction_reference: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    paid_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    recorded_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+
+    bill: Mapped["Bill"] = relationship(back_populates="payments")
+    recorded_by_user: Mapped["User"] = relationship(
+        back_populates="recorded_payments"
+    )
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_payments_amount"),
+        CheckConstraint(
+            "method IN ('CASH', 'CARD', 'UPI', 'BANK_TRANSFER', 'OTHER')",
+            name="ck_payments_method",
+        ),
+        Index(
+            "uq_payments_transaction_reference",
+            "transaction_reference",
+            unique=True,
+            postgresql_where=text("transaction_reference IS NOT NULL"),
+        ),
+        Index("idx_payments_bill", "bill_id"),
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="refresh_tokens")
+
+    __table_args__ = (
+        Index("idx_refresh_user", "user_id"),
+    )
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="password_reset_tokens")
+
+    __table_args__ = (
+        Index("idx_password_reset_user", "user_id"),
     )
