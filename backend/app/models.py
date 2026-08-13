@@ -9,13 +9,16 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     SmallInteger,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -63,6 +66,9 @@ class User(Base):
     )
     receptionist: Mapped[Optional["Receptionist"]] = relationship(
         back_populates="user"
+    )
+    medical_record_versions: Mapped[list["MedicalRecordVersion"]] = relationship(
+        back_populates="changed_by_user"
     )
 
     __table_args__ = (
@@ -124,6 +130,9 @@ class Patient(Base):
     appointments: Mapped[list["Appointment"]] = relationship(
         back_populates="patient"
     )
+    medical_records: Mapped[list["MedicalRecord"]] = relationship(
+        back_populates="patient"
+    )
 
     __table_args__ = (
         CheckConstraint("dob <= CURRENT_DATE", name="ck_patients_dob"),
@@ -176,6 +185,9 @@ class Doctor(Base):
 
     user: Mapped["User"] = relationship(back_populates="doctor")
     appointments: Mapped[list["Appointment"]] = relationship(
+        back_populates="doctor"
+    )
+    medical_records: Mapped[list["MedicalRecord"]] = relationship(
         back_populates="doctor"
     )
 
@@ -260,6 +272,10 @@ class Appointment(Base):
 
     patient: Mapped["Patient"] = relationship(back_populates="appointments")
     doctor: Mapped["Doctor"] = relationship(back_populates="appointments")
+    medical_record: Mapped[Optional["MedicalRecord"]] = relationship(
+        back_populates="appointment",
+        uselist=False,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -297,4 +313,75 @@ class Department(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+class MedicalRecord(Base):
+    __tablename__ = "medical_records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    appointment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("appointments.id"), nullable=False, unique=True
+    )
+    patient_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("patients.id"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=False
+    )
+    latest_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    patient: Mapped["Patient"] = relationship(back_populates="medical_records")
+    doctor: Mapped["Doctor"] = relationship(back_populates="medical_records")
+    appointment: Mapped["Appointment"] = relationship(
+        back_populates="medical_record"
+    )
+    versions: Mapped[list["MedicalRecordVersion"]] = relationship(
+        back_populates="record",
+        cascade="all, delete-orphan",
+        order_by="MedicalRecordVersion.version_number",
+    )
+
+
+class MedicalRecordVersion(Base):
+    __tablename__ = "medical_record_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    record_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("medical_records.id"), nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    symptoms: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    diagnosis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vitals_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    changed_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    record: Mapped["MedicalRecord"] = relationship(back_populates="versions")
+    changed_by_user: Mapped["User"] = relationship(
+        back_populates="medical_record_versions"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "version_number >= 1",
+            name="ck_medical_record_versions_version_number",
+        ),
+        UniqueConstraint(
+            "record_id", "version_number", name="uq_medical_record_versions_record_version"
+        ),
     )

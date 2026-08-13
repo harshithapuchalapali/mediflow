@@ -32,6 +32,8 @@ from app.models import (  # noqa: E402,F401
     Receptionist,
     Department,
     Appointment,
+    MedicalRecord,
+    MedicalRecordVersion,
 )
 
 target_metadata = Base.metadata
