@@ -23,7 +23,16 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 
 # Alembic learns about our application's tables through Base.metadata.
 from app.db import Base  # noqa: E402
-from app.models import User  # noqa: E402,F401  (import registers User on Base.metadata)
+# Importing models registers their tables on Base.metadata so alembic
+# autogenerate can detect them. Every model must be imported here.
+from app.models import (  # noqa: E402,F401
+    User,
+    Patient,
+    Doctor,
+    Receptionist,
+    Department,
+    Appointment,
+)
 
 target_metadata = Base.metadata
 
