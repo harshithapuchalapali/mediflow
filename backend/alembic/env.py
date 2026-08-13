@@ -32,6 +32,7 @@ from app.models import (  # noqa: E402,F401
     Doctor,
     Receptionist,
     Department,
+    HospitalSettings,
     Appointment,
     MedicalRecord,
     MedicalRecordVersion,
@@ -43,6 +44,10 @@ from app.models import (  # noqa: E402,F401
     Payment,
     RefreshToken,
     PasswordResetToken,
+    DoctorSchedule,
+    DoctorUnavailable,
+    DoctorDepartment,
+    AuditLog,
 )
 
 target_metadata = Base.metadata

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Optional
 
 from sqlalchemy import (
@@ -14,6 +14,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
     text,
@@ -85,6 +86,10 @@ class User(Base):
     password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    created_unavailability: Mapped[list["DoctorUnavailable"]] = relationship(
+        back_populates="created_by_user"
+    )
+    audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
 
     __table_args__ = (
         CheckConstraint(
@@ -226,6 +231,18 @@ class Doctor(Base):
         back_populates="verifier",
         foreign_keys="LabRequest.verified_by",
     )
+    schedules: Mapped[list["DoctorSchedule"]] = relationship(
+        back_populates="doctor",
+        cascade="all, delete-orphan",
+    )
+    unavailable_periods: Mapped[list["DoctorUnavailable"]] = relationship(
+        back_populates="doctor",
+        cascade="all, delete-orphan",
+    )
+    departments: Mapped[list["Department"]] = relationship(
+        secondary="doctor_departments",
+        back_populates="doctors",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -356,6 +373,50 @@ class Department(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+    doctors: Mapped[list["Doctor"]] = relationship(
+        secondary="doctor_departments",
+        back_populates="departments",
+    )
+
+
+class DoctorDepartment(Base):
+    """M:N join between doctors and departments (database-design.md §3.8)."""
+
+    __tablename__ = "doctor_departments"
+
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), primary_key=True
+    )
+    department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("departments.id"), primary_key=True
+    )
+
+
+class HospitalSettings(Base):
+    __tablename__ = "hospital_settings"
+
+    # Single-row resource per database-design.md §3.1: id is locked to 1
+    # so the CHECK constraint guarantees exactly one row.
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    hospital_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    timezone: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        server_default=text("'Asia/Kolkata'"),
+    )
+    logo_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_hospital_settings_single_row"),
+        CheckConstraint(
+            "email ~ '^.+@.+$'",
+            name="ck_hospital_settings_email",
+        ),
     )
 
 
@@ -704,7 +765,7 @@ class Payment(Base):
             "method IN ('CASH', 'CARD', 'UPI', 'BANK_TRANSFER', 'OTHER')",
             name="ck_payments_method",
         ),
-        Index(
+Index(
             "uq_payments_transaction_reference",
             "transaction_reference",
             unique=True,
@@ -765,4 +826,90 @@ class PasswordResetToken(Base):
 
     __table_args__ = (
         Index("idx_password_reset_user", "user_id"),
+    )
+
+
+class DoctorSchedule(Base):
+    __tablename__ = "doctor_schedules"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=False
+    )
+    day_of_week: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+
+    doctor: Mapped["Doctor"] = relationship(back_populates="schedules")
+
+    __table_args__ = (
+        CheckConstraint(
+            "day_of_week BETWEEN 0 AND 6",
+            name="ck_doctor_schedules_day_of_week",
+        ),
+        CheckConstraint(
+            "end_time > start_time",
+            name="ck_doctor_schedules_time_range",
+        ),
+        UniqueConstraint(
+            "doctor_id", "day_of_week", "start_time",
+            name="uq_doctor_schedules_doctor_day_start",
+        ),
+        Index("idx_doctor_schedules_doctor", "doctor_id"),
+    )
+
+
+class DoctorUnavailable(Base):
+    __tablename__ = "doctor_unavailable"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=False
+    )
+    from_date: Mapped[date] = mapped_column(Date, nullable=False)
+    to_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    created_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    doctor: Mapped["Doctor"] = relationship(back_populates="unavailable_periods")
+    created_by_user: Mapped["User"] = relationship(back_populates="created_unavailability")
+
+    __table_args__ = (
+        CheckConstraint(
+            "to_date >= from_date",
+            name="ck_doctor_unavailable_date_range",
+        ),
+        Index("idx_doc_unavail_doctor", "doctor_id", "from_date", "to_date"),
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    user: Mapped[Optional["User"]] = relationship(back_populates="audit_logs")
+
+    __table_args__ = (
+        Index("idx_audit_entity", "entity_type", "entity_id"),
+        Index("idx_audit_time", "created_at"),
     )

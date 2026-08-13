@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.appointments.schemas import AppointmentCreate, AppointmentUpdate
+from app.doctor_schedules.service import validate_appointment_slot
 from app.models import Appointment, Department, Doctor, Patient, User
 
 # Status workflow (docs/requirements.md): pending → confirmed → checked-in →
@@ -121,6 +122,10 @@ def create_appointment(db: Session, user: User, data: AppointmentCreate) -> Appo
         if own_doctor is None or data.doctor_id != own_doctor:
             raise _forbidden("Doctors may only create appointments assigned to themselves")
 
+    validate_appointment_slot(
+        db, data.doctor_id, data.date_time_utc, data.duration_minutes
+    )
+
     appointment = Appointment(
         patient_id=data.patient_id,
         doctor_id=data.doctor_id,
@@ -235,6 +240,10 @@ def update_appointment(
         if not _can_modify_calendar(user.role):
             raise _forbidden()
         _check_24h(appointment, new_date_time or appointment.date_time, user.role)
+        # Re-validate against the doctor's schedule/unavailability for the new slot.
+        slot_datetime = new_date_time or appointment.date_time
+        slot_duration = fields.get("duration_minutes", appointment.duration_minutes)
+        validate_appointment_slot(db, appointment.doctor_id, slot_datetime, slot_duration)
 
     # Status changes. The 24h rule only guards cancel (and reschedule), never
     # normal status transitions (confirm / check-in / completion).

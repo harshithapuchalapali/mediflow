@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.audit import write_audit_log
 from app.db import get_db
 from app.deps import get_current_user, require_roles
 from app.models import PasswordResetToken, Patient, RefreshToken, User
@@ -330,6 +331,7 @@ def me(current_user: User = Depends(get_current_user)) -> User:
 @router.post("/users/{user_id}/deactivate", status_code=status.HTTP_200_OK)
 def deactivate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("ADMIN")),
 ) -> dict:
@@ -348,6 +350,14 @@ def deactivate_user(
     user.status = "DEACTIVATED"
     user.deactivated_at = datetime.now(timezone.utc)
     _revoke_all_refresh_tokens(db, user.id)
+    write_audit_log(
+        db,
+        user_id=current_user.id,
+        action="USER_DEACTIVATE",
+        entity_type="USER",
+        entity_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
     db.commit()
     return {"message": "User deactivated"}
 
@@ -355,6 +365,7 @@ def deactivate_user(
 @router.post("/users/{user_id}/activate", status_code=status.HTTP_200_OK)
 def activate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("ADMIN")),
 ) -> dict:
@@ -374,5 +385,13 @@ def activate_user(
     user.deactivated_at = None
     user.failed_attempts = 0
     user.locked_until = None
+    write_audit_log(
+        db,
+        user_id=current_user.id,
+        action="USER_ACTIVATE",
+        entity_type="USER",
+        entity_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
     db.commit()
     return {"message": "User activated"}
