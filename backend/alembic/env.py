@@ -28,12 +28,15 @@ from app.db import Base  # noqa: E402
 from app.models import (  # noqa: E402,F401
     User,
     Patient,
+    PatientAllergy,
     Doctor,
     Receptionist,
     Department,
     Appointment,
     MedicalRecord,
     MedicalRecordVersion,
+    Prescription,
+    PrescriptionItem,
 )
 
 target_metadata = Base.metadata

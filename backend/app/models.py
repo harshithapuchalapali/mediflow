@@ -70,6 +70,9 @@ class User(Base):
     medical_record_versions: Mapped[list["MedicalRecordVersion"]] = relationship(
         back_populates="changed_by_user"
     )
+    patient_allergies: Mapped[list["PatientAllergy"]] = relationship(
+        back_populates="created_by_user"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -133,6 +136,12 @@ class Patient(Base):
     medical_records: Mapped[list["MedicalRecord"]] = relationship(
         back_populates="patient"
     )
+    patient_allergies: Mapped[list["PatientAllergy"]] = relationship(
+        back_populates="patient"
+    )
+    prescriptions: Mapped[list["Prescription"]] = relationship(
+        back_populates="patient"
+    )
 
     __table_args__ = (
         CheckConstraint("dob <= CURRENT_DATE", name="ck_patients_dob"),
@@ -188,6 +197,9 @@ class Doctor(Base):
         back_populates="doctor"
     )
     medical_records: Mapped[list["MedicalRecord"]] = relationship(
+        back_populates="doctor"
+    )
+    prescriptions: Mapped[list["Prescription"]] = relationship(
         back_populates="doctor"
     )
 
@@ -348,6 +360,9 @@ class MedicalRecord(Base):
         cascade="all, delete-orphan",
         order_by="MedicalRecordVersion.version_number",
     )
+    prescriptions: Mapped[list["Prescription"]] = relationship(
+        back_populates="medical_record"
+    )
 
 
 class MedicalRecordVersion(Base):
@@ -384,4 +399,99 @@ class MedicalRecordVersion(Base):
         UniqueConstraint(
             "record_id", "version_number", name="uq_medical_record_versions_record_version"
         ),
+    )
+
+
+class PatientAllergy(Base):
+    __tablename__ = "patient_allergies"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    patient_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("patients.id"), nullable=False
+    )
+    allergen: Mapped[str] = mapped_column(String(150), nullable=False)
+    severity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    patient: Mapped["Patient"] = relationship(back_populates="patient_allergies")
+    created_by_user: Mapped[Optional["User"]] = relationship(
+        back_populates="patient_allergies"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('MILD', 'MODERATE', 'SEVERE')",
+            name="ck_patient_allergies_severity",
+        ),
+        Index("idx_patient_allergies_patient", "patient_id"),
+    )
+
+
+class Prescription(Base):
+    __tablename__ = "prescriptions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    medical_record_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("medical_records.id"), nullable=False
+    )
+    doctor_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("doctors.id"), nullable=False
+    )
+    patient_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("patients.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    medical_record: Mapped["MedicalRecord"] = relationship(
+        back_populates="prescriptions"
+    )
+    doctor: Mapped["Doctor"] = relationship(back_populates="prescriptions")
+    patient: Mapped["Patient"] = relationship(back_populates="prescriptions")
+    items: Mapped[list["PrescriptionItem"]] = relationship(
+        back_populates="prescription",
+        cascade="all, delete-orphan",
+        order_by="PrescriptionItem.id",
+    )
+
+    __table_args__ = (
+        Index("idx_prescriptions_patient", "patient_id"),
+        Index("idx_prescriptions_record", "medical_record_id"),
+        Index("idx_prescriptions_doctor", "doctor_id"),
+    )
+
+
+class PrescriptionItem(Base):
+    __tablename__ = "prescription_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    prescription_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("prescriptions.id"), nullable=False
+    )
+    medicine_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    dosage: Mapped[str] = mapped_column(String(100), nullable=False)
+    frequency: Mapped[str] = mapped_column(String(100), nullable=False)
+    duration_in_days: Mapped[Optional[int]] = mapped_column(
+        SmallInteger, nullable=True
+    )
+
+    prescription: Mapped["Prescription"] = relationship(back_populates="items")
+
+    __table_args__ = (
+        CheckConstraint(
+            "duration_in_days > 0",
+            name="ck_prescription_items_duration_in_days",
+        ),
+        Index("idx_prescription_items_prescription", "prescription_id"),
     )
