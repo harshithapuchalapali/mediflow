@@ -26,7 +26,6 @@ BASE = datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc)
 def iso(dt):
     return dt.isoformat()
 
-
 def main():
     db = SessionLocal()
     users = {}
