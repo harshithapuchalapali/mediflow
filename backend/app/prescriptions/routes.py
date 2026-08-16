@@ -1,11 +1,12 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Prescription, User
+from app.models import HospitalSettings, Prescription, User
+from app.pdf.prescription_pdf import prescription_pdf_bytes
 from app.prescriptions import service
 from app.prescriptions.schemas import (
     PrescriptionCreate,
@@ -54,6 +55,23 @@ def list_prescriptions(
         db, current_user, patient_id=patient_id, doctor_id=doctor_id
     )
     return [_to_out(p) for p in prescriptions]
+
+
+@router.get("/{prescription_id}/pdf")
+def download_prescription_pdf(
+    prescription_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    prescription = service.get_prescription(db, current_user, prescription_id)
+    settings = db.get(HospitalSettings, 1)
+    pdf = prescription_pdf_bytes(db, prescription, settings)
+    filename = "prescription-%d.pdf" % prescription.id
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="%s"' % filename},
+    )
 
 
 @router.get("/{prescription_id}", response_model=PrescriptionOut)

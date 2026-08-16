@@ -9,12 +9,14 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import (
     Appointment,
+    AuditLog,
     Bill,
     BillItem,
     Department,
     Doctor,
     MedicalRecord,
     MedicalRecordVersion,
+    Notification,
     Patient,
     Payment,
     Receptionist,
@@ -415,6 +417,16 @@ def main():
                 db.query(Doctor).filter(
                     Doctor.license_number.like(f"{lic}%")
                 ).delete(synchronize_session=False)
+            db.query(Notification).filter(
+                Notification.user_id.in_(
+                    db.query(User.id).filter(User.email.like("bill.%@mediflow.local"))
+                )
+            ).delete(synchronize_session=False)
+            db.query(AuditLog).filter(
+                AuditLog.user_id.in_(
+                    db.query(User.id).filter(User.email.like("bill.%@mediflow.local"))
+                )
+            ).delete(synchronize_session=False)
             db.query(Receptionist).filter(
                 Receptionist.user_id.in_(
                     db.query(User.id).filter(User.email.like("bill.%@mediflow.local"))
