@@ -12,6 +12,7 @@ from app.models import (
     PrescriptionItem,
     User,
 )
+from app.notifications import service as notification_service
 from app.prescriptions.schemas import (
     AllergyWarningOut,
     PrescriptionCreate,
@@ -85,6 +86,8 @@ def create_prescription(
         items=items,
     )
     db.add(prescription)
+    db.flush()
+    notification_service.notify_prescription_created(db, prescription)
     db.commit()
     db.refresh(prescription)
 

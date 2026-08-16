@@ -90,6 +90,9 @@ class User(Base):
         back_populates="created_by_user"
     )
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="user")
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -887,6 +890,38 @@ class DoctorUnavailable(Base):
             name="ck_doctor_unavailable_date_range",
         ),
         Index("idx_doc_unavail_doctor", "doctor_id", "from_date", "to_date"),
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'IN_APP'")
+    )
+    is_read: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="notifications")
+
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('IN_APP', 'EMAIL')",
+            name="ck_notifications_channel",
+        ),
+        Index("idx_notif_user", "user_id", "is_read"),
     )
 
 

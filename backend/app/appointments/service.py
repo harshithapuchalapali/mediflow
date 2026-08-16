@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.appointments.schemas import AppointmentCreate, AppointmentUpdate
 from app.doctor_schedules.service import validate_appointment_slot
 from app.models import Appointment, Department, Doctor, Patient, User
+from app.notifications import service as notification_service
 
 # Status workflow (docs/requirements.md): pending → confirmed → checked-in →
 # completed | cancelled | no-show
@@ -141,6 +142,7 @@ def create_appointment(db: Session, user: User, data: AppointmentCreate) -> Appo
     db.add(appointment)
     try:
         db.flush()
+        notification_service.notify_appointment_booked(db, appointment)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -271,6 +273,12 @@ def update_appointment(
             value = data.date_time_utc
         setattr(appointment, field, value)
 
+    if "status" in fields:
+        if fields["status"] == "CONFIRMED":
+            notification_service.notify_appointment_confirmed(db, appointment)
+        elif fields["status"] == "CANCELLED":
+            notification_service.notify_appointment_cancelled(db, appointment)
+
     try:
         db.commit()
     except IntegrityError as exc:
@@ -308,6 +316,7 @@ def cancel_appointment(db: Session, user: User, appointment_id: int) -> Appointm
         raise _unprocessable("This appointment cannot be cancelled")
 
     appointment.status = "CANCELLED"
+    notification_service.notify_appointment_cancelled(db, appointment)
     db.commit()
     db.refresh(appointment)
     return appointment

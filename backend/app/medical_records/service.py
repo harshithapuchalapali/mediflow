@@ -17,6 +17,7 @@ from app.models import (
     Patient,
     User,
 )
+from app.notifications import service as notification_service
 
 
 def _forbidden(detail: str = "Not permitted for this medical record") -> HTTPException:
@@ -110,6 +111,7 @@ def create_medical_record(
         changed_by=user.id,
     )
     db.add(version)
+    notification_service.notify_medical_record_created(db, record)
     try:
         db.commit()
     except IntegrityError:

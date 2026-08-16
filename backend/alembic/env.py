@@ -48,6 +48,7 @@ from app.models import (  # noqa: E402,F401
     DoctorUnavailable,
     DoctorDepartment,
     AuditLog,
+    Notification,
 )
 
 target_metadata = Base.metadata

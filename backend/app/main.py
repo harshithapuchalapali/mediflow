@@ -14,6 +14,7 @@ from app.doctor_schedules.routes import (
 )
 from app.lab_requests.routes import router as lab_requests_router
 from app.medical_records.routes import router as medical_records_router
+from app.notifications.routes import notifications_router
 from app.patients.routes import patients_router
 from app.patients.routes import register_router
 from app.prescriptions.routes import router as prescriptions_router
@@ -31,6 +32,7 @@ app.include_router(register_router)
 app.include_router(patients_router)
 app.include_router(appointments_router)
 app.include_router(medical_records_router)
+app.include_router(notifications_router)
 app.include_router(prescriptions_router)
 app.include_router(lab_requests_router)
 app.include_router(billing_router)

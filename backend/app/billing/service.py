@@ -21,6 +21,7 @@ from app.models import (
     Payment,
     User,
 )
+from app.notifications import service as notification_service
 
 _MAX_BILL_NUMBER_RETRIES = 5
 
@@ -136,6 +137,7 @@ def create_bill(db: Session, user: User, data: BillCreate) -> Bill:
             items=items,
         )
         db.add(bill)
+        notification_service.notify_bill_created(db, bill)
         try:
             db.commit()
             break
@@ -279,6 +281,8 @@ def record_payment(
     )
     _recompute_status(bill, total, paid + data.amount)
     db.add(payment)
+    if bill.status == "PAID":
+        notification_service.notify_bill_paid(db, bill)
     try:
         db.commit()
     except IntegrityError:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.lab_requests.schemas import LabRequestCreate, LabRequestUpdate
 from app.models import Appointment, Doctor, LabRequest, Patient, User
+from app.notifications import service as notification_service
 
 _VALID_TRANSITIONS = {
     "REQUESTED": "IN_PROGRESS",
@@ -186,6 +187,10 @@ def update_lab_request(
         request.verified_at = datetime.now(timezone.utc)
 
     request.status = data.target_status
+    if data.target_status == "RESULT_READY":
+        notification_service.notify_lab_ready(db, request)
+    elif data.target_status == "VERIFIED":
+        notification_service.notify_lab_verified(db, request)
     db.commit()
     db.refresh(request)
     return request
