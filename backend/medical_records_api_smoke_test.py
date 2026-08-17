@@ -11,6 +11,7 @@ from app.models import (
     Doctor,
     MedicalRecord,
     MedicalRecordVersion,
+    Notification,
     Patient,
     Receptionist,
     User,
@@ -362,6 +363,12 @@ def main():
                 Receptionist.user_id.in_(
                     db.query(User.id).filter(User.email.like("mr.%@mediflow.local"))
                 )
+            ).delete(synchronize_session=False)
+            tmp_user_ids = db.query(User.id).filter(
+                User.email.like("mr.%@mediflow.local")
+            )
+            db.query(Notification).filter(
+                Notification.user_id.in_(tmp_user_ids)
             ).delete(synchronize_session=False)
             db.query(User).filter(
                 User.email.like("mr.%@mediflow.local")

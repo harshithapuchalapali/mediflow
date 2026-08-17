@@ -7,11 +7,13 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import (
     Appointment,
+    AuditLog,
     Department,
     Doctor,
     LabRequest,
     MedicalRecord,
     MedicalRecordVersion,
+    Notification,
     Patient,
     Receptionist,
     User,
@@ -374,6 +376,15 @@ def main():
                 Receptionist.user_id.in_(
                     db.query(User.id).filter(User.email.like("lab.%@mediflow.local"))
                 )
+            ).delete(synchronize_session=False)
+            tmp_user_ids = db.query(User.id).filter(
+                User.email.like("lab.%@mediflow.local")
+            )
+            db.query(AuditLog).filter(
+                AuditLog.user_id.in_(tmp_user_ids)
+            ).delete(synchronize_session=False)
+            db.query(Notification).filter(
+                Notification.user_id.in_(tmp_user_ids)
             ).delete(synchronize_session=False)
             db.query(User).filter(
                 User.email.like("lab.%@mediflow.local")

@@ -12,6 +12,7 @@ from app.models import (
     Doctor,
     DoctorSchedule,
     DoctorUnavailable,
+    Notification,
     Patient,
     Receptionist,
     User,
@@ -459,37 +460,41 @@ def main():
     finally:
         try:
             db.rollback()
-            if dept is not None:
-                db.query(Appointment).filter(
-                    Appointment.department_id == dept.id
-                ).delete(synchronize_session=False)
-            doc_ids = db.query(Doctor.id).filter(
-                Doctor.license_number.like(f"SCHE%{suffix[:6]}%")
-            ).all()
-            doc_ids = [d[0] for d in doc_ids]
-            if doc_ids:
-                db.query(Appointment).filter(
-                    Appointment.doctor_id.in_(doc_ids)
-                ).delete(synchronize_session=False)
-                db.query(DoctorUnavailable).filter(
-                    DoctorUnavailable.doctor_id.in_(doc_ids)
-                ).delete(synchronize_session=False)
-                db.query(DoctorSchedule).filter(
-                    DoctorSchedule.doctor_id.in_(doc_ids)
-                ).delete(synchronize_session=False)
-                db.query(Doctor).filter(Doctor.id.in_(doc_ids)).delete(
-                    synchronize_session=False)
+            sch_user_ids = db.query(User.id).filter(
+                User.email.like("sch.%@mediflow.local"))
+            sch_doc_ids = db.query(Doctor.id).filter(
+                Doctor.user_id.in_(sch_user_ids))
+            sch_patient_ids = db.query(Patient.id).filter(
+                Patient.user_id.in_(sch_user_ids))
+            db.query(Appointment).filter(
+                Appointment.created_by.in_(sch_user_ids)
+            ).delete(synchronize_session=False)
+            db.query(Appointment).filter(
+                Appointment.patient_id.in_(sch_patient_ids)
+            ).delete(synchronize_session=False)
+            db.query(Appointment).filter(
+                Appointment.doctor_id.in_(sch_doc_ids)
+            ).delete(synchronize_session=False)
+            db.query(DoctorUnavailable).filter(
+                DoctorUnavailable.doctor_id.in_(sch_doc_ids)
+            ).delete(synchronize_session=False)
+            db.query(DoctorSchedule).filter(
+                DoctorSchedule.doctor_id.in_(sch_doc_ids)
+            ).delete(synchronize_session=False)
+            db.query(Doctor).filter(
+                Doctor.user_id.in_(sch_user_ids)
+            ).delete(synchronize_session=False)
             if dept is not None:
                 db.query(Department).filter(Department.id == dept.id).delete(
                     synchronize_session=False)
             db.query(Receptionist).filter(
-                Receptionist.user_id.in_(
-                    db.query(User.id).filter(
-                        User.email.like("sch.%@mediflow.local"))
-                )
+                Receptionist.user_id.in_(sch_user_ids)
             ).delete(synchronize_session=False)
             db.query(Patient).filter(
-                Patient.mrn.like(f"SCHEP{suffix[:6]}%")
+                Patient.user_id.in_(sch_user_ids)
+            ).delete(synchronize_session=False)
+            db.query(Notification).filter(
+                Notification.user_id.in_(sch_user_ids)
             ).delete(synchronize_session=False)
             db.query(User).filter(
                 User.email.like("sch.%@mediflow.local")

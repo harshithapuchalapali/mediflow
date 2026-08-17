@@ -6,7 +6,15 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import Appointment, Department, Doctor, Patient, Receptionist, User
+from app.models import (
+    Appointment,
+    Department,
+    Doctor,
+    Notification,
+    Patient,
+    Receptionist,
+    User,
+)
 from app.security import create_access_token, hash_password
 
 client = TestClient(app)
@@ -443,6 +451,12 @@ def main():
                     db.query(User.id)
                     .filter(User.email.like("apptapi.%@mediflow.local"))
                 )
+            ).delete(synchronize_session=False)
+            tmp_user_ids = db.query(User.id).filter(
+                User.email.like("apptapi.%@mediflow.local")
+            )
+            db.query(Notification).filter(
+                Notification.user_id.in_(tmp_user_ids)
             ).delete(synchronize_session=False)
             db.query(User).filter(
                 User.email.like("apptapi.%@mediflow.local")
