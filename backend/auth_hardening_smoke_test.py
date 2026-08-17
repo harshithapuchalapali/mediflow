@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import Patient, User
+from app.models import AuditLog, Patient, User
 from app.security import create_access_token, hash_password
 
 client = TestClient(app)
@@ -459,6 +459,10 @@ def main():
 
             ids = [u.id for u in users.values()]
             if ids:
+                # AuditLog rows reference users.id without cascade; remove first.
+                db.query(AuditLog).filter(
+                    AuditLog.user_id.in_(ids)
+                ).delete(synchronize_session=False)
                 db.query(RefreshToken).filter(
                     RefreshToken.user_id.in_(ids)
                 ).delete(synchronize_session=False)

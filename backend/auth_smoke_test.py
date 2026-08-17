@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import User
+from app.models import AuditLog, User
 from app.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     SECRET_KEY,
@@ -168,6 +168,15 @@ def main():
     finally:
         try:
             db.rollback()
+            user_ids = []
+            for obj in (active_user, deactivated_user):
+                if obj is not None:
+                    user_ids.append(obj.id)
+            # AuditLog rows reference users.id without cascade; remove them first.
+            if user_ids:
+                db.query(AuditLog).filter(AuditLog.user_id.in_(user_ids)).delete(
+                    synchronize_session=False
+                )
             for obj in (active_user, deactivated_user):
                 if obj is not None:
                     db.delete(obj)

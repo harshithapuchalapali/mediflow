@@ -253,6 +253,9 @@ def get_receptionist(db: Session, receptionist_id: int) -> Receptionist:
 def create_receptionist(
     db: Session, current_user: User, payload: object, request: Request
 ) -> Receptionist:
+    # DISC-5: employee_code is intentionally NULL/blank by default — not all
+    # receptionists are issued a staff code yet, so the column stays optional.
+    # DISC-4: there is deliberately no users.phone column in v1.
     email = _normalize_email(payload.email)
     _fail_if_email_taken(db, email)
     employee_code = (

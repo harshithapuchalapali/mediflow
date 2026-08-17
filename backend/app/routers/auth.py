@@ -9,6 +9,7 @@ from app.audit import write_audit_log
 from app.db import get_db
 from app.deps import get_current_user, require_roles
 from app.models import PasswordResetToken, Patient, RefreshToken, User
+from app.rate_limit import check_rate_limit
 from app.schemas import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
@@ -34,6 +35,19 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 MAX_FAILED_ATTEMPTS = 3
 LOCKOUT_MINUTES = 15
+
+# Audit actions for authentication events (database-design.md §3.22).
+ACTION_LOGIN = "LOGIN"
+ACTION_LOGIN_FAILED = "LOGIN_FAILED"
+ACTION_LOCKOUT = "LOCKOUT"
+
+# Rate-limit scopes for the password-reset endpoints.
+SCOPE_FORGOT_PASSWORD = "forgot_password"
+SCOPE_RESET_PASSWORD = "reset_password"
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request and request.client else None
 
 
 def _active_refresh_token(db: Session, raw_token: str) -> RefreshToken:
@@ -73,15 +87,27 @@ def _build_token_response(db: Session, user: User) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    """Authenticate with email/password and return access + refresh tokens."""
+def login(
+    payload: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """Authenticate with email/password and return access + refresh tokens.
+
+    Every outcome is recorded on the audit log (same transaction where
+    possible): successful logins -> LOGIN, failed logins -> LOGIN_FAILED,
+    and the event that triggers a lockout -> LOCKOUT.
+    """
     email = payload.email.strip().lower()
     now = datetime.now(timezone.utc)
+    ip = _client_ip(request)
 
     user = db.query(User).filter(User.email == email).first()
 
     if user is None:
-        # Verify against a dummy hash to keep timing consistent.
+        # Verify against a dummy hash to keep timing consistent. Unknown
+        # emails are NOT audited: logging every probe would let an attacker
+        # flood the audit table, and there is no account to attribute.
         _ = verify_password(payload.password, hash_password("__dummy__"))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -89,12 +115,30 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         )
 
     if user.status != "ACTIVE" or user.deactivated_at is not None:
+        write_audit_log(
+            db,
+            user_id=user.id,
+            action=ACTION_LOGIN_FAILED,
+            entity_type="USER",
+            entity_id=user.id,
+            ip_address=ip,
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is deactivated",
         )
 
     if user.locked_until is not None and user.locked_until > now:
+        write_audit_log(
+            db,
+            user_id=user.id,
+            action=ACTION_LOGIN_FAILED,
+            entity_type="USER",
+            entity_id=user.id,
+            ip_address=ip,
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is temporarily locked. Try again later.",
@@ -102,8 +146,26 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
 
     if not verify_password(payload.password, user.password_hash):
         user.failed_attempts = min(user.failed_attempts + 1, 5)
-        if user.failed_attempts >= MAX_FAILED_ATTEMPTS:
+        lockout_triggered = user.failed_attempts >= MAX_FAILED_ATTEMPTS
+        if lockout_triggered:
             user.locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
+        write_audit_log(
+            db,
+            user_id=user.id,
+            action=ACTION_LOGIN_FAILED,
+            entity_type="USER",
+            entity_id=user.id,
+            ip_address=ip,
+        )
+        if lockout_triggered:
+            write_audit_log(
+                db,
+                user_id=user.id,
+                action=ACTION_LOCKOUT,
+                entity_type="USER",
+                entity_id=user.id,
+                ip_address=ip,
+            )
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -113,6 +175,14 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     user.failed_attempts = 0
     user.locked_until = None
     user.last_login_at = now
+    write_audit_log(
+        db,
+        user_id=user.id,
+        action=ACTION_LOGIN,
+        entity_type="USER",
+        entity_id=user.id,
+        ip_address=ip,
+    )
     db.commit()
     db.refresh(user)
 
@@ -158,15 +228,22 @@ def logout(
 
 @router.post("/forgot-password")
 def forgot_password(
-    payload: ForgotPasswordRequest, db: Session = Depends(get_db)
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> dict:
     """
     Create an expiring password-reset token for a matching ACTIVE account.
 
     v1 has no email gateway, so the raw token is returned in the response;
-    a production build would email it instead. Deactivated/unknown emails
-    get a generic message to avoid user enumeration.
+    a production build would email it instead. The response body is generic
+    for known/unknown emails so the endpoint does not reveal whether an
+    account exists (the token field is simply absent when there is no match).
+    Rate limiting by client prevents trivial abuse of this unauthenticated
+    endpoint.
     """
+    check_rate_limit(db, scope=SCOPE_FORGOT_PASSWORD, request=request)
+
     email = payload.email.strip().lower()
     user = (
         db.query(User)
@@ -175,9 +252,7 @@ def forgot_password(
     )
 
     if user is None:
-        return {
-            "message": "If a matching account exists, a reset token was issued."
-        }
+        return {"message": "If a matching account exists, a reset token was issued."}
 
     raw_token = generate_opaque_token()
     db.add(
@@ -190,16 +265,20 @@ def forgot_password(
     )
     db.commit()
     return {
-        "message": "A reset token was issued.",
+        "message": "If a matching account exists, a reset token was issued.",
         "reset_token": raw_token,
     }
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 def reset_password(
-    payload: ResetPasswordRequest, db: Session = Depends(get_db)
+    payload: ResetPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> dict:
     """Set a new password using a valid, unused, unexpired reset token."""
+    check_rate_limit(db, scope=SCOPE_RESET_PASSWORD, request=request)
+
     now = datetime.now(timezone.utc)
     reset = (
         db.query(PasswordResetToken)

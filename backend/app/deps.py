@@ -55,7 +55,13 @@ def get_current_user(
 
 
 def require_authenticated_user(user: User = Depends(get_current_user)) -> User:
-    """Dependency alias for 'the request must be authenticated'."""
+    """Dependency alias for 'the request must be authenticated'.
+
+    Kept intentionally: it names the security contract at the route boundary
+    (any logged-in user, any role) without leaking the bearer-scheme details,
+    and is exercised by rbac_smoke_test.py. Endpoints that need a specific role
+    should use ``require_roles`` instead.
+    """
     return user
 
 
