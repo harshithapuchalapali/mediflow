@@ -644,6 +644,11 @@ class LabRequest(Base):
         foreign_keys=[verified_by_admin],
     )
 
+    @property
+    def has_report(self) -> bool:
+        """Whether a report file is attached (the path itself is never exposed)."""
+        return bool(self.report_file_path)
+
     __table_args__ = (
         CheckConstraint(
             "status IN ('REQUESTED', 'IN_PROGRESS', 'RESULT_READY', 'VERIFIED')",
@@ -829,6 +834,38 @@ class PasswordResetToken(Base):
 
     __table_args__ = (
         Index("idx_password_reset_user", "user_id"),
+    )
+
+
+class RateLimitEvent(Base):
+    """PostgreSQL-backed fixed-window counter for abuse-prone endpoints.
+
+    One row per (scope, key, window_start). ``key`` is a hash of the client
+    identifier (IP) so raw addresses are not stored. Rows are pruned by the
+    rate-limit service as new windows open.
+    """
+
+    __tablename__ = "rate_limit_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(50), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "scope", "key_hash", "window_start",
+            name="uq_rate_limit_events_scope_key_window",
+        ),
+        Index("idx_rate_limit_lookup", "scope", "key_hash", "window_start"),
     )
 
 

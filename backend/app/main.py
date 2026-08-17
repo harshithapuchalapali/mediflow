@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin_console.routes import (
     audit_router,
@@ -8,6 +11,7 @@ from app.admin_console.routes import (
 )
 from app.appointments.routes import router as appointments_router
 from app.billing.routes import router as billing_router
+from app.doctor_dashboard.routes import router as doctor_dashboard_router
 from app.doctor_schedules.routes import (
     schedules_router as doctor_schedules_router,
     unavailable_router as doctor_unavailable_router,
@@ -25,7 +29,32 @@ from app.staff_management.routes import (
     users_router,
 )
 
+
+def _cors_origins() -> list[str]:
+    """Allowed CORS origins, read from the CORS_ORIGINS environment variable.
+
+    Comma-separated. The wildcard ``*`` is rejected so credentials are never
+    combined with an unrestricted origin policy.
+    """
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        raise ValueError("CORS_ORIGINS must not contain '*' (credentials are enabled)")
+    return origins
+
+
 app = FastAPI(title="MediFlow API")
+
+_cors_origins_list = _cors_origins()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 app.include_router(auth_router)
 app.include_router(register_router)
@@ -38,6 +67,7 @@ app.include_router(lab_requests_router)
 app.include_router(billing_router)
 app.include_router(doctor_schedules_router)
 app.include_router(doctor_unavailable_router)
+app.include_router(doctor_dashboard_router)
 app.include_router(settings_router)
 app.include_router(departments_router)
 app.include_router(audit_router)

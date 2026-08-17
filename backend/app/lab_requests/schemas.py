@@ -44,7 +44,7 @@ class LabRequestOut(BaseModel):
     notes: Optional[str] = None
     status: str
     result_details: Optional[str] = None
-    report_file_path: Optional[str] = None
+    has_report: bool = False
     requested_at: datetime
     verified_by: Optional[int] = None
     verified_by_admin: Optional[int] = None

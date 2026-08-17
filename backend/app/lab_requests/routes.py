@@ -1,11 +1,12 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.lab_requests import service
+from app.lab_requests import report_files, service
 from app.lab_requests.schemas import (
     LabRequestCreate,
     LabRequestOut,
@@ -70,3 +71,35 @@ def update_lab_request(
 ) -> LabRequestOut:
     request = service.update_lab_request(db, current_user, request_id, payload)
     return _to_out(request)
+
+
+@router.post("/{request_id}/report", response_model=LabRequestOut)
+async def upload_lab_report(
+    request_id: int,
+    file: UploadFile = File(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> LabRequestOut:
+    data = await file.read(report_files.MAX_REPORT_BYTES + 1)
+    lab = service.upload_lab_report(
+        db,
+        current_user,
+        request_id,
+        data=data,
+        original_filename=file.filename,
+        request=request,
+    )
+    return _to_out(lab)
+
+
+@router.get("/{request_id}/report")
+def download_lab_report(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    path, media_type, filename = service.get_lab_report_file(
+        db, current_user, request_id
+    )
+    return FileResponse(path=path, media_type=media_type, filename=filename)

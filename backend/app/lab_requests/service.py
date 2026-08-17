@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.audit import write_audit_log
+from app.lab_requests import report_files
 from app.lab_requests.schemas import LabRequestCreate, LabRequestUpdate
 from app.models import Appointment, Doctor, LabRequest, Patient, User
 from app.notifications import service as notification_service
@@ -13,6 +16,8 @@ _VALID_TRANSITIONS = {
     "IN_PROGRESS": "RESULT_READY",
     "RESULT_READY": "VERIFIED",
 }
+
+ACTION_LAB_REPORT_UPLOAD = "LAB_REPORT_UPLOAD"
 
 
 def _forbidden(detail: str = "Not permitted for this lab request") -> HTTPException:
@@ -44,6 +49,90 @@ def _own_doctor_id(db: Session, user: User) -> Optional[int]:
 def _own_patient_id(db: Session, user: User) -> Optional[int]:
     patient = db.query(Patient).filter(Patient.user_id == user.id).first()
     return patient.id if patient else None
+
+
+def _ip(request) -> Optional[str]:
+    if request is None:
+        return None
+    client = getattr(request, "client", None)
+    return client.host if client else None
+
+
+def upload_lab_report(
+    db: Session,
+    user: User,
+    request_id: int,
+    *,
+    data: bytes,
+    original_filename: Optional[str] = None,
+    request=None,
+) -> LabRequest:
+    """Attach a verified lab-report file to a lab request (or replace it).
+
+    Authorization mirrors the existing lab rules: the owning DOCTOR may upload;
+    ADMIN may as well (full clinical access + verify rights). Patients and
+    receptionists are rejected outright — they must never upload clinical
+    reports. Ownership comes from the authenticated user, never the client.
+    """
+    if user.role not in ("DOCTOR", "ADMIN"):
+        raise _forbidden("Only doctors and admins may upload lab reports")
+
+    lab = db.get(LabRequest, request_id)
+    if lab is None:
+        raise _not_found()
+
+    if user.role == "DOCTOR" and _own_doctor_id(db, user) != lab.doctor_id:
+        raise _not_found()
+
+    ext = report_files.validate_report(data, original_filename)
+    new_path = report_files.store_report(data, ext)
+    previous_path = lab.report_file_path
+
+    lab.report_file_path = new_path
+    write_audit_log(
+        db,
+        user_id=user.id,
+        action=ACTION_LAB_REPORT_UPLOAD,
+        entity_type="LAB_REQUEST",
+        entity_id=lab.id,
+        ip_address=_ip(request),
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        report_files.delete_report(new_path)
+        raise
+
+    # Replacement: supersede the old file only after the new one is stored
+    # and committed, so no orphaned report is left behind.
+    report_files.delete_report(previous_path)
+    db.refresh(lab)
+    return lab
+
+
+def get_lab_report_file(
+    db: Session, user: User, request_id: int
+) -> Tuple[Path, str, str]:
+    """Authorize and resolve a report for download.
+
+    Access rules are exactly the existing lab visibility rules
+    (get_lab_request): own doctor / own verified patient / admin, 403 for
+    receptionists, 404 for unknown or inaccessible requests, and 404 when no
+    report is attached.
+    """
+    lab = get_lab_request(db, user, request_id)
+    if not lab.report_file_path:
+        raise _not_found("Lab report not found")
+
+    path = report_files.resolve_report_path(lab.report_file_path)
+    if path is None:
+        raise _not_found("Lab report not found")
+
+    suffix = path.suffix.lower()
+    media_type = report_files.MEDIA_TYPES.get(suffix, "application/octet-stream")
+    filename = "lab-report-%d%s" % (lab.id, suffix)
+    return path, media_type, filename
 
 
 def create_lab_request(
